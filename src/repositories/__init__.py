@@ -1,0 +1,7 @@
+from repositories.catalog_repository import CatalogRepository
+from repositories.client_repository import ClientRepository
+from repositories.account_repository import AccountRepository
+from repositories.pix_key_repository import PixKeyRepository
+from repositories.transaction_repository import TransactionRepository
+from repositories.entry_repository import EntryRepository
+from repositories.event_repository import EventRepository

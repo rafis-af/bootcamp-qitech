@@ -1,0 +1,110 @@
+{
+  "title": "PostPixKey",
+  "type": "object",
+  "properties": {
+    "key_type": {
+      "type": "string",
+      "enum": [
+        "cpf",
+        "email",
+        "phone",
+        "random"
+      ]
+    },
+    "key_value": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "password": {
+      "type": "string",
+      "pattern": "^\\d{6}$"
+    }
+  },
+  "required": [
+    "key_type",
+    "password"
+  ],
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "key_type": {
+            "const": "random"
+          }
+        },
+        "required": [
+          "key_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "key_value": false
+        }
+      },
+      "else": {
+        "required": [
+          "key_value"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "key_type": {
+            "const": "cpf"
+          }
+        },
+        "required": [
+          "key_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "key_value": {
+            "pattern": "^\\d{3}\\.\\d{3}\\.\\d{3}-\\d{2}$"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "key_type": {
+            "const": "email"
+          }
+        },
+        "required": [
+          "key_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "key_value": {
+            "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "key_type": {
+            "const": "phone"
+          }
+        },
+        "required": [
+          "key_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "key_value": {
+            "pattern": "^\\+55\\d{10,11}$"
+          }
+        }
+      }
+    }
+  ]
+}

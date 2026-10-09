@@ -1,0 +1,2 @@
+from connectors.receita_connector import ReceitaConnector
+from connectors.serasa_connector import SerasaConnector

@@ -1,0 +1,67 @@
+from uuid import uuid4
+
+from tests.utils import MockScenario, ObjectGenerator, PayloadGenerator, RequestGenerator
+
+
+class TestAccountOpen:
+    def test_opens_with_zero_balance_and_never_returns_the_password(self):
+        client = ObjectGenerator.create_client()
+
+        status, response = RequestGenerator.POST_account(
+            client["client_key"], PayloadGenerator.create_account_payload("482913")
+        )
+
+        assert status == 201
+        assert response["balance"] == 0
+        assert response["status"] == "active"
+        assert response["level"] == "gold"
+        assert response["client_key"] == client["client_key"]
+
+        assert "482913" not in str(response)
+        assert "password" not in str(response)
+
+        status, response = RequestGenerator.GET_account(response["account_key"])
+        assert status == 200
+        assert "password" not in str(response)
+
+    def test_one_account_per_client(self):
+        account = ObjectGenerator.create_account()
+
+        status, response = RequestGenerator.POST_account(
+            account["client_key"], PayloadGenerator.create_account_payload()
+        )
+
+        assert status == 409
+        assert response["code"] == "QIT001011"
+
+    def test_blocked_client_never_opens_an_account(self):
+        client = ObjectGenerator.create_client(MockScenario.SERASA_RESTRICTION)
+
+        status, response = RequestGenerator.POST_account(
+            client["client_key"], PayloadGenerator.create_account_payload()
+        )
+
+        assert status == 409
+        assert response["code"] == "QIT001008"
+
+    def test_unknown_client(self):
+        status, response = RequestGenerator.POST_account(str(uuid4()), PayloadGenerator.create_account_payload())
+
+        assert status == 404
+        assert response["code"] == "QIT001001"
+
+    def test_password_must_have_6_digits_and_is_never_echoed(self):
+        client = ObjectGenerator.create_client()
+
+        for wrong_password in ["12345", "1234567", "12a456", 123456]:
+            status, response = RequestGenerator.POST_account(client["client_key"], {"password": wrong_password})
+
+            assert status == 400, wrong_password
+            assert response["code"] == "QIT000001"
+            assert str(wrong_password) not in response["description"]
+
+    def test_get_unknown_account(self):
+        status, response = RequestGenerator.GET_account(str(uuid4()))
+
+        assert status == 404
+        assert response["code"] == "QIT001010"

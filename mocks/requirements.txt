@@ -1,0 +1,4 @@
+# As mesmas versões da API (requirements.txt da raiz): o mock é só um
+# FastAPI pequeno, e não tem por que rodar outra versão.
+fastapi==0.141.1
+uvicorn==0.52.3

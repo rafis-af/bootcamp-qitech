@@ -1,0 +1,14 @@
+{
+  "title": "PostAccount",
+  "type": "object",
+  "properties": {
+    "password": {
+      "type": "string",
+      "pattern": "^\\d{6}$"
+    }
+  },
+  "required": [
+    "password"
+  ],
+  "additionalProperties": false
+}
