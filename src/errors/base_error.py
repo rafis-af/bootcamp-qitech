@@ -162,6 +162,17 @@ class InvalidBodyType(QIException):
         super().__init__(title, self.code, http_status, description, translation)
 
 
+class UnsupportedMediaType(QIException):
+    code = "QIT000006"
+
+    def __init__(self) -> None:
+        title = "Unsupported media type"
+        http_status = 415
+        description = "The request body must be sent with Content-Type: application/json."
+        translation = "O corpo da requisição precisa ser enviado com o header Content-Type: application/json."
+        super().__init__(title, self.code, http_status, description, translation)
+
+
 class InvalidParameter(QIException):
     code = "QIT000010"
 

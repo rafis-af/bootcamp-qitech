@@ -83,3 +83,12 @@ class TestStatement:
 
         assert status == 404
         assert response["code"] == "QIT001010"
+
+    def test_last_day_of_the_calendar_is_accepted(self):
+        """31/12/9999 é o último dia que existe: não pode estourar o cálculo do fim do período."""
+        account = ObjectGenerator.create_account()
+
+        status, response = RequestGenerator.GET_statement(account["account_key"], {"date_to": "9999-12-31"})
+
+        assert status == 200
+        assert response["data"] == []

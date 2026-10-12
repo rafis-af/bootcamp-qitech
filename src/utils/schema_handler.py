@@ -1,6 +1,7 @@
 import functools
 import json
 import os
+from typing import Optional
 
 from jsonschema import RefResolver
 from jsonschema.exceptions import ValidationError, best_match
@@ -60,7 +61,37 @@ class SchemaCache:
         return validator_class(schema, resolver=resolver)
 
 
+def find_nul_character(instance) -> Optional[str]:
+    """Nome do primeiro campo com um "\\x00" no texto, ou None.
+
+    O PostgreSQL não aceita o caractere nulo em texto. Sem esta checagem,
+    o driver falhava ao gravar e a API respondia 500 para um dado que o
+    schema aceitava. Corpo e query são planos, então basta olhar o
+    primeiro nível (e os itens das listas, que são de texto).
+    """
+    if not isinstance(instance, dict):
+        return None
+
+    for name, value in instance.items():
+        values = value if isinstance(value, list) else [value]
+
+        for item in values:
+            if isinstance(item, str) and "\x00" in item:
+                return name
+
+    return None
+
+
 def validate_or_raise(schema_file_name: str, instance: dict, where: str) -> None:
+    nul_field = find_nul_character(instance)
+    if nul_field is not None:
+        noun_en, noun_pt = ("Field", "O campo") if where == "body" else ("Parameter", "O parâmetro")
+        raise InvalidSchema(
+            f"{noun_en} '{nul_field}' contains the NUL character (\\u0000), which is not accepted.",
+            f"{noun_pt} '{nul_field}' contém o caractere nulo (\\u0000), que não é aceito.",
+            nul_field,
+        )
+
     validator = SchemaCache.get_validator(schema_file_name)
     error = best_match(validator.iter_errors(instance))
 

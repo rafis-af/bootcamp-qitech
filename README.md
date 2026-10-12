@@ -230,6 +230,12 @@ depende dos **três primeiros dígitos do CPF**:
 | `924` | sem score | `201` Prata |
 | `925` | score 800 com atraso | `201` Prata |
 | `930` | Serasa demora 6 s | `503` QIT001009, nada gravado |
+| `940` | Receita responde HTTP 500 | `502` QIT001041, nada gravado |
+| `941` | Receita responde 200 sem o campo `situation` | `502` QIT001042, nada gravado |
+| `942` | Receita recusa a credencial desta API (HTTP 401) | `502` QIT001043, nada gravado |
+| `947` | Receita não encontra o CPF (HTTP 404) | `422` QIT001044, nada gravado |
+| `950` | Serasa responde HTTP 500 | `502` QIT001041, nada gravado |
+| `951` | Serasa responde 200 sem o campo `score` | `502` QIT001042, nada gravado |
 
 O CPF ainda precisa ter os dígitos verificadores certos. Para trocar o
 mock por um serviço de verdade, basta mudar `RECEITA_API_URL` e
@@ -249,8 +255,8 @@ Com a API de pé (`(healthy)` no `docker compose ps`):
 docker compose --profile tests run --build --rm tests
 ```
 
-São 121 testes, cerca de 50 segundos. O resultado esperado no fim é
-`121 passed`.
+São 148 testes, cerca de 25 segundos. O resultado esperado no fim é
+`148 passed`.
 
 **Rodam em paralelo** (pytest-xdist, ligado no `pytest.ini` com `-n auto`:
 um worker por CPU). Isso só é possível porque **nenhum teste depende de
@@ -301,7 +307,9 @@ O que a suíte cobre, por arquivo:
 | `tests/integration/transaction/` | depósito, transferência, Pix, limite diário, renda, tarifa dinâmica, idempotência e **concorrência** (saídas simultâneas, mesmo ID ao mesmo tempo, A→B e B→A sem deadlock) |
 | `tests/integration/pix_key/` | tipos de chave, CPF do dono, limite de 5, chave disputada por duas contas |
 | `tests/integration/statement/` | ordem, sinal, saldo depois, paginação, período |
-| `tests/integration/test_error_messages.py` | cada erro com código e mensagem próprios: corpo inválido, campo por campo, token, rota, regras de negócio |
+| `tests/integration/test_error_messages.py` | cada erro com código e mensagem próprios: corpo inválido, Content-Type, campo por campo, caractere nulo, token, rota, regras de negócio, conta ocupada |
+| `tests/integration/client/test_external_service_errors.py` | cada falha da Receita e da Serasa (QIT001041 a QIT001044), com a conferência de que nada foi gravado |
+| `tests/unit/` | os erros de infraestrutura (pool esgotado, banco fora do ar, timeout, conflito, erro inesperado) e a Receita fora do ar (QIT001040), chamando o código direto, porque nenhuma rota consegue provocá-los de forma confiável |
 
 Uma exceção à regra "só HTTP", e ela é explicada em
 `tests/utils/db_utils.py`: os testes **leem** a tabela de eventos (nenhuma
@@ -471,6 +479,7 @@ um CPF no formato 000.000.000-00"), sem nunca repetir o valor recebido
 | `QIT000003` | 400 | o corpo não é um JSON válido |
 | `QIT000004` | 400 | a rota precisa de corpo, e ele não veio |
 | `QIT000005` | 400 | o corpo é JSON, mas não é um objeto (`{...}`) |
+| `QIT000006` | 415 | o corpo não foi enviado com `Content-Type: application/json` |
 | `QIT000010` | 400 | os parâmetros se contradizem (`date_from` depois de `date_to`) |
 | `QIT000011` | 409 | outra operação está usando a mesma conta (passou do `DB_LOCK_TIMEOUT_MS`); nada gravado, pode repetir |
 | `QIT000012` | 409 | o dado repete um registro único que já existe (corrida entre dois pedidos iguais); nada gravado |

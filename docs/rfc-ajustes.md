@@ -93,7 +93,7 @@ Quatro coisas mudaram, e todas são de texto ou de decisão já tomada no códig
 
 **Novo:**
 
-> ... A suíte automatizada tem 124 testes de integração, rodados contra a API e o PostgreSQL. Eles cobrem saídas simultâneas, limite do dia, reenvios, concorrência de ID, senha, renda e troca de tarifa, e em 9 pontos verificam que o saldo de cada conta é igual à soma dos seus lançamentos.
+> ... A suíte automatizada tem 148 testes, rodados contra a API e o PostgreSQL (e alguns deles direto no código, quando a falha é de infraestrutura). Eles cobrem saídas simultâneas, limite do dia, reenvios, concorrência de ID, senha, renda e troca de tarifa, e em 9 pontos verificam que o saldo de cada conta é igual à soma dos seus lançamentos.
 
 ---
 

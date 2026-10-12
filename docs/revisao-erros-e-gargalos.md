@@ -1,10 +1,19 @@
 # Revisão: tratamento de erros e gargalos
 
 Revisão feita sobre a API v1 em 12/10/2026. Tudo o que está marcado como
-**corrigido** está no código e coberto pelos testes (121 testes passando,
-96 antigos + 25 novos). O que está em **recomendações** ficou de fora de
-propósito: muda regra de negócio, segurança ou infraestrutura, e é decisão
-do time.
+**corrigido** está no código e coberto pelos testes (148 testes passando).
+O que está em **recomendações** ficou de fora de propósito: muda regra de
+negócio, segurança ou infraestrutura, e é decisão do time.
+
+Depois da revisão, três casos foram corrigidos e ganharam teste:
+
+- **Content-Type diferente de JSON** respondia "o corpo precisa ser um
+  objeto JSON", que aponta a coisa errada. Agora responde 415 com
+  `QIT000006`, dizendo o header que falta.
+- **Caractere nulo (`\u0000`)** em nome ou em qualquer texto dava 500. Agora
+  é 400, com o campo nomeado (`QIT000001`).
+- **Extrato até 31/12/9999** dava 500, porque somar um dia estourava o
+  calendário. Agora o período fecha no último dia que existe.
 
 ## 1. Erros com mensagem própria
 

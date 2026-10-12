@@ -2,6 +2,7 @@
 import asyncio
 
 from fastapi import FastAPI, Response
+from fastapi.responses import JSONResponse
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -12,6 +13,10 @@ RECEITA_SITUATION_BY_PREFIX = {
     "901": "CANCELADA",
 }
 RECEITA_SLOW_PREFIX = "910"
+# Falhas da Receita: o status HTTP é o que o prefixo pede. "941" responde
+# 200, mas sem o campo "situation" (fora do formato combinado).
+RECEITA_HTTP_STATUS_BY_PREFIX = {"940": 500, "942": 401, "947": 404}
+RECEITA_MALFORMED_PREFIX = "941"
 
 SERASA_CLEAN_REPORT = {
     "has_restriction": False,
@@ -28,6 +33,8 @@ SERASA_CHANGES_BY_PREFIX = {
     "925": {"has_late_payments": True},
 }
 SERASA_SLOW_PREFIX = "930"
+SERASA_HTTP_STATUS_BY_PREFIX = {"950": 500}
+SERASA_MALFORMED_PREFIX = "951"  # 200, mas sem o campo "score"
 
 
 def prefix_of(document_number: str) -> str:
@@ -52,6 +59,12 @@ async def consult_receita(payload: dict) -> dict:
     if prefix == RECEITA_SLOW_PREFIX:
         await asyncio.sleep(SLOW_RESPONSE_SECONDS)
 
+    if prefix in RECEITA_HTTP_STATUS_BY_PREFIX:
+        return JSONResponse(status_code=RECEITA_HTTP_STATUS_BY_PREFIX[prefix], content={"error": "mock failure"})
+
+    if prefix == RECEITA_MALFORMED_PREFIX:
+        return {"document_number": document_number}
+
     situation = RECEITA_SITUATION_BY_PREFIX.get(prefix, "REGULAR")
 
     return {"document_number": document_number, "situation": situation}
@@ -65,8 +78,14 @@ async def consult_serasa(payload: dict) -> dict:
     if prefix == SERASA_SLOW_PREFIX:
         await asyncio.sleep(SLOW_RESPONSE_SECONDS)
 
+    if prefix in SERASA_HTTP_STATUS_BY_PREFIX:
+        return JSONResponse(status_code=SERASA_HTTP_STATUS_BY_PREFIX[prefix], content={"error": "mock failure"})
+
     report = dict(SERASA_CLEAN_REPORT)
     report.update(SERASA_CHANGES_BY_PREFIX.get(prefix, {}))
     report["document_number"] = document_number
+
+    if prefix == SERASA_MALFORMED_PREFIX:
+        del report["score"]
 
     return report

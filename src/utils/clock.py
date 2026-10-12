@@ -36,6 +36,11 @@ def current_month_range() -> Tuple[datetime, datetime]:
 
 
 def day_end(day: date) -> datetime:
+    # 31/12/9999 é o último dia que o date aceita: não existe dia seguinte.
+    # Somar um dia ali estourava (OverflowError) e a API respondia 500.
+    if day == date.max:
+        return datetime.max.replace(tzinfo=SAO_PAULO)
+
     return day_start(day + timedelta(days=1))
 
 

@@ -13,6 +13,7 @@ from errors.base_error import (
     MethodNotAllowed,
     MissingBody,
     NotFoundResource,
+    UnsupportedMediaType,
 )
 from errors.unexpected import is_bug, map_unexpected_exception
 from utils.logger import get_logger
@@ -21,6 +22,7 @@ from utils.request_context import get_request_id
 logger = get_logger(__name__)
 
 BODY_TYPE_ERRORS = {"dict_type", "model_attributes_type"}
+JSON_MEDIA_TYPE = "application/json"
 
 
 def qi_exception_to_response(exception: QIException) -> JSONResponse:
@@ -52,11 +54,21 @@ def describe_validation_error(error: dict) -> str:
     return message
 
 
-def validation_error_to_qi_exception(error: dict) -> QIException:
+def is_json_content_type(content_type: str = None) -> bool:
+    """Aceita "application/json" com ou sem parâmetros ("; charset=utf-8")."""
+    if not content_type:
+        return False
+
+    return content_type.split(";")[0].strip().lower() == JSON_MEDIA_TYPE
+
+
+def validation_error_to_qi_exception(error: dict, content_type: str = None) -> QIException:
     """O FastAPI só valida o corpo como "um dict"; o resto é do jsonschema.
 
     Então o que cai aqui é sempre um destes: o corpo não é JSON, não veio,
-    ou veio JSON mas não é um objeto. Cada um tem a sua mensagem.
+    não é um objeto, ou veio num Content-Type que não é JSON. Cada um tem a
+    sua mensagem: sem o Content-Type certo, o FastAPI nem tenta ler o corpo
+    como JSON, e "não é um objeto" seria uma mensagem enganosa.
     """
     error_type = error.get("type")
     location = tuple(error.get("loc", ()))
@@ -70,6 +82,8 @@ def validation_error_to_qi_exception(error: dict) -> QIException:
         return MissingBody()
 
     if origin == "body" and error_type in BODY_TYPE_ERRORS:
+        if not is_json_content_type(content_type):
+            return UnsupportedMediaType()
         return InvalidBodyType()
 
     description = describe_validation_error(error)
@@ -120,7 +134,9 @@ def register_error_handlers(application: FastAPI) -> None:
         else:
             first_error = {}
 
-        return qi_exception_to_response(validation_error_to_qi_exception(first_error))
+        content_type = request.headers.get("content-type")
+
+        return qi_exception_to_response(validation_error_to_qi_exception(first_error, content_type))
 
     @application.exception_handler(Exception)
     def handle_unexpected_error(request: Request, exception: Exception) -> JSONResponse:

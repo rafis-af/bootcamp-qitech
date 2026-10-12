@@ -1,5 +1,7 @@
+import time
 from contextlib import contextmanager
 from os import environ
+from threading import Event
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import OperationalError
@@ -30,6 +32,14 @@ EVENTS_OF_CLIENT_QUERY = text(
     JOIN client ON client.id = event.client_id
     WHERE client.client_key = :client_key
     ORDER BY event.id
+    """
+)
+
+LOCK_ACCOUNT_QUERY = text(
+    """
+    SELECT id FROM account
+    WHERE account_key = :account_key
+    FOR UPDATE
     """
 )
 
@@ -65,6 +75,8 @@ class DbUtils:
     • `change_fee` troca a tarifa do jeito que a RFC 2.1 descreve: fechar
       a vigente e abrir outra, por dado, sem deploy. Na vida real isso é
       um comando do back-office no banco; aqui, é este método.
+    • `hold_account_lock` segura a trava de uma conta, como outra operação
+      faria, para provar que a API responde "conta ocupada" (QIT000011).
 
     Nada aqui apaga dado. Cada teste cria o que usa e olha só para o que
     criou, então nenhum depende de o banco estar vazio — nem do que outro
@@ -97,6 +109,21 @@ class DbUtils:
             with engine.begin() as connection:
                 connection.execute(CLOSE_CURRENT_FEE_QUERY, params)
                 connection.execute(OPEN_NEW_FEE_QUERY, params)
+
+    @staticmethod
+    def hold_account_lock(account_key: str, seconds: float, locked: Event) -> None:
+        """Segura a trava de uma conta por `seconds`, como outra operação faria.
+
+        Roda numa thread: `locked` é avisado assim que a trava está com este
+        método, para o teste só fazer o pedido depois. É o único jeito de a
+        API responder "conta ocupada" (QIT000011): a trava só fica presa se
+        outra transação a segura.
+        """
+        with DbUtils._connect() as engine:
+            with engine.begin() as connection:
+                connection.execute(LOCK_ACCOUNT_QUERY, {"account_key": account_key})
+                locked.set()
+                time.sleep(seconds)
 
     @staticmethod
     def _fetch_all(query, params: dict) -> list:

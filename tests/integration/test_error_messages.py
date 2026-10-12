@@ -1,11 +1,16 @@
+import threading
 from uuid import uuid4
 
-from tests.utils import INTERNAL_TOKEN, MockScenario, ObjectGenerator, PayloadGenerator, RequestGenerator
+from tests.utils import INTERNAL_TOKEN, DbUtils, MockScenario, ObjectGenerator, PayloadGenerator, RequestGenerator
 from tests.utils.requisition import ClientRequisition
 
 
-def send_raw(method: str, endpoint: str, body: str = None, token: str = INTERNAL_TOKEN) -> tuple:
-    headers = {"Content-Type": "application/json"}
+def send_raw(
+    method: str, endpoint: str, body: str = None, token: str = INTERNAL_TOKEN, content_type: str = "application/json"
+) -> tuple:
+    headers = {}
+    if content_type is not None:
+        headers["Content-Type"] = content_type
     if token is not None:
         headers["INTERNAL-TOKEN"] = token
 
@@ -31,6 +36,29 @@ class TestBodyErrors:
 
     def test_body_that_is_a_list(self):
         status, response, _raw = send_raw("POST", "/client", "[1, 2, 3]")
+
+        assert status == 400
+        assert response["code"] == "QIT000005"
+
+    def test_body_sent_as_text_is_415_and_says_the_header(self):
+        status, response, _raw = send_raw("POST", "/client", '{"name": "Ana"}', content_type="text/plain")
+
+        assert status == 415
+        assert response["code"] == "QIT000006"
+        assert "application/json" in response["translation"]
+
+    def test_body_without_any_content_type_is_415_not_a_wrong_body(self):
+        """Sem o header, o FastAPI nem lê o corpo como JSON. A mensagem tem que
+        apontar o header, e não dizer que o corpo "não é um objeto"."""
+        status, response, _raw = send_raw("POST", "/client", '{"name": "Ana"}', content_type=None)
+
+        assert status == 415
+        assert response["code"] == "QIT000006"
+
+    def test_json_content_type_with_charset_is_accepted(self):
+        status, response, _raw = send_raw(
+            "POST", "/client", "[1, 2, 3]", content_type="application/json; charset=utf-8"
+        )
 
         assert status == 400
         assert response["code"] == "QIT000005"
@@ -274,3 +302,44 @@ class TestBusinessMessages:
         assert status == 409
         assert response["code"] == "QIT001020"
         assert "deposit de R$ 10,00" in response["translation"]
+
+
+class TestInputAndConcurrencyErrors:
+    """Entrada que o PostgreSQL recusa, e conta ocupada por outra operação."""
+
+    def test_nul_character_is_a_field_error_not_a_500(self):
+        payload = PayloadGenerator.create_client_payload(name="Ana\u0000Silva")
+
+        status, response = RequestGenerator.POST_client(payload)
+
+        assert status == 400
+        assert response["code"] == "QIT000001"
+        assert response["field"] == "name"
+        assert "caractere nulo" in response["translation"]
+
+    def test_nul_character_in_a_query_parameter_is_named(self):
+        status, response = RequestGenerator.GET_clients({"name": "Ana\u0000"})
+
+        assert status == 400
+        assert response["code"] == "QIT000001"
+        assert response["field"] == "name"
+
+    def test_account_busy_for_too_long_is_409_and_nothing_is_saved(self):
+        """Outra operação segura a trava da conta por mais tempo que o
+        DB_LOCK_TIMEOUT_MS (5 s): o pedido desiste, responde 409 e não grava."""
+        account = ObjectGenerator.create_account()
+        locked = threading.Event()
+        holder = threading.Thread(target=DbUtils.hold_account_lock, args=(account["account_key"], 8, locked))
+
+        holder.start()
+        try:
+            assert locked.wait(timeout=5)
+            payload = PayloadGenerator.create_deposit_payload(1000)
+            status, response = RequestGenerator.POST_deposit(account["account_key"], payload)
+        finally:
+            holder.join()
+
+        assert status == 409
+        assert response["code"] == "QIT000011"
+        assert "tente de novo" in response["translation"]
+        assert ObjectGenerator.get_balance(account["account_key"]) == 0
