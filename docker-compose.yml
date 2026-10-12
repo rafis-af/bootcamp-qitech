@@ -46,6 +46,13 @@ services:
       SERASA_API_URL: ${SERASA_API_URL:-http://mock:8080/serasa}
       SERASA_API_INTERNAL_TOKEN: ${SERASA_API_INTERNAL_TOKEN:-default_token}
       SERASA_API_TIMEOUT: ${SERASA_API_TIMEOUT:-5}
+      # Pool de conexões e limites de tempo do banco (README, seção 9).
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-10}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-20}
+      DB_POOL_TIMEOUT: ${DB_POOL_TIMEOUT:-10}
+      DB_LOCK_TIMEOUT_MS: ${DB_LOCK_TIMEOUT_MS:-5000}
+      DB_STATEMENT_TIMEOUT_MS: ${DB_STATEMENT_TIMEOUT_MS:-15000}
+      DB_IDLE_IN_TRANSACTION_TIMEOUT_MS: ${DB_IDLE_IN_TRANSACTION_TIMEOUT_MS:-30000}
     volumes:
       # Monta o codigo pra dentro do container: salvou o arquivo,
       # a API recarrega sozinha (o --reload ali embaixo).

@@ -25,7 +25,7 @@ class ClientRepository:
         return client
 
     def get_by_key(self, client_key: str) -> Optional[Client]:
-        return self.session.query(Client).filter(Client.client_key == client_key).first()
+        return self.session.query(Client).filter(Client.client_key == client_key.lower()).first()
 
     def get_by_document_number(self, document_number: str) -> Optional[Client]:
         return self.session.query(Client).filter(Client.document_number == document_number).first()
@@ -46,11 +46,15 @@ class ClientRepository:
 
         name = filters.get("name")
         if name is not None:
-            query = query.filter(Client.name.ilike(f"%{name}%"))
+            # % e _ são curingas do LIKE: sem o escape, buscar "100%" ou "a_b"
+            # trazia nomes que não têm esses caracteres.
+            escaped_name = name.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            query = query.filter(Client.name.ilike(f"%{escaped_name}%", escape="\\"))
 
         email = filters.get("email")
         if email is not None:
-            query = query.filter(Client.email == email)
+            # O cadastro guarda o e-mail em minúsculas; o filtro precisa fazer igual.
+            query = query.filter(Client.email == email.lower())
 
         document_number = filters.get("document_number")
         if document_number is not None:

@@ -77,7 +77,8 @@ class TestTransfer:
         payload = PayloadGenerator.create_transfer_payload(str(uuid4()), 100)
         status, response = RequestGenerator.POST_transfer(origin["account_key"], payload)
         assert status == 404
-        assert response["code"] == "QIT001010"
+        assert response["code"] == "QIT001015"
+        assert response["field"] == "destination_account_key"
 
         payload = PayloadGenerator.create_transfer_payload(origin["account_key"], 100)
         status, response = RequestGenerator.POST_transfer(str(uuid4()), payload)
@@ -93,7 +94,7 @@ class TestTransfer:
         status, response = RequestGenerator.POST_transfer(origin["account_key"], payload)
 
         assert status == 409
-        assert response["code"] == "QIT001012"
+        assert response["code"] == "QIT001016"
         assert ObjectGenerator.get_balance(origin["account_key"]) == 10000
         assert ObjectGenerator.get_balance(destination["account_key"]) == 0
 

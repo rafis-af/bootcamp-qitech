@@ -11,8 +11,8 @@ from tests.utils.requisition import ClientRequisition
 # todo acento antes de responder ("normalize NFKD" + encode ASCII), e a
 # fonte acentuada chegava no cliente sem cedilha nem til. Quem repuser
 # aquela linha deixa o teste abaixo vermelho, nomeando o campo.
-FORBIDDEN_TRANSLATION = "Requisição precisa ser interna"
-NOT_FOUND_TRANSLATION = "O resource solicitado não pode ser encontrado, mas pode estar disponível no futuro. Requests subsequentes do cliente são permitidos."
+FORBIDDEN_TRANSLATION = "Requisição precisa ser interna: falta o header INTERNAL-TOKEN."
+NOT_FOUND_TRANSLATION = "A rota PUT /sample não existe nesta API. Confira o caminho e o método."
 
 
 class TestHealthCheck:

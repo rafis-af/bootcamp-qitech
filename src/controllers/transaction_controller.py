@@ -9,7 +9,9 @@ from errors import (
     IncomeLimitExceeded,
     InsufficientBalance,
     InvalidDocumentNumber,
+    NotFoundDestinationAccount,
     NotFoundPixKey,
+    PixToOwnAccount,
     SameAccountTransfer,
     TransactionKeyConflict,
 )
@@ -34,12 +36,17 @@ class TransactionController(BaseAccountController):
     def deposit(self, account_key: str, deposit_data: dict) -> dict:
         self.logger.debug(f"Depositando na conta {account_key}")
 
+        # As chaves são UUID em minúsculas no banco. Sem normalizar, a mesma
+        # conta escrita em maiúsculas dava "não encontrada" e um reenvio
+        # legítimo virava conflito de transaction_key.
+        account_key = account_key.lower()
+
         transaction_key = deposit_data["transaction_key"].lower()
         amount = self._amount_of(deposit_data)
 
         depositor_document_number = deposit_data["depositor_document_number"]
         if not is_valid_cpf(depositor_document_number):
-            raise InvalidDocumentNumber(depositor_document_number)
+            raise InvalidDocumentNumber(depositor_document_number, "depositor_document_number")
 
         requested = {
             "transaction_type": TransactionType.DEPOSIT,
@@ -80,8 +87,10 @@ class TransactionController(BaseAccountController):
     def transfer(self, origin_account_key: str, transfer_data: dict) -> dict:
         self.logger.debug(f"Transferindo da conta {origin_account_key}")
 
+        origin_account_key = origin_account_key.lower()
+
         transaction_key = transfer_data["transaction_key"].lower()
-        destination_account_key = transfer_data["destination_account_key"]
+        destination_account_key = transfer_data["destination_account_key"].lower()
         amount = self._amount_of(transfer_data)
 
         requested = {
@@ -96,7 +105,10 @@ class TransactionController(BaseAccountController):
             return replay
 
         origin = self._get_account(origin_account_key)
-        destination = self._get_account(destination_account_key)
+        destination = self.account_repository.get_by_key(destination_account_key)
+
+        if destination is None:
+            raise NotFoundDestinationAccount(destination_account_key)
 
         if origin.id == destination.id:
             raise SameAccountTransfer(origin_account_key)
@@ -106,10 +118,12 @@ class TransactionController(BaseAccountController):
     def send_pix(self, origin_account_key: str, pix_data: dict) -> dict:
         self.logger.debug(f"Enviando um Pix da conta {origin_account_key}")
 
+        origin_account_key = origin_account_key.lower()
+
         transaction_key = pix_data["transaction_key"].lower()
         amount = self._amount_of(pix_data)
 
-        pix_key_value = pix_data["pix_key"].lower()
+        pix_key_value = pix_data["pix_key"].strip().lower()
 
         requested = {
             "transaction_type": TransactionType.PIX,
@@ -132,7 +146,7 @@ class TransactionController(BaseAccountController):
         destination = pix_key.account
 
         if origin.id == destination.id:
-            raise SameAccountTransfer(origin_account_key)
+            raise PixToOwnAccount(pix_key_value)
 
         return self._send_money(transaction_key, requested, origin, destination, pix_data["password"], pix_key)
 
@@ -151,6 +165,15 @@ class TransactionController(BaseAccountController):
         detail = self._operation_detail(transaction_key, requested)
         detail["destination_account_key"] = destination.account_key
 
+        # Recusa barata primeiro: conta já bloqueada não gasta bcrypt. A
+        # checagem que vale continua sendo a de baixo, com a trava.
+        self._check_active(origin, detail)
+        self._check_destination_active(destination, origin, detail)
+
+        # O bcrypt (~0,3 s) roda ANTES da trava; com a trava, só o resultado
+        # é registrado. Veja BaseAccountController._password_matches.
+        password_matched = self._password_matches(origin, password)
+
         self._lock_accounts(origin, destination)
 
         replay = self._find_replay(transaction_key, requested, origin.account_key)
@@ -158,8 +181,8 @@ class TransactionController(BaseAccountController):
             return replay
 
         self._check_active(origin, detail)
-        self._check_active(destination, detail)
-        self._authenticate(origin, password)
+        self._check_destination_active(destination, origin, detail)
+        self._authenticate(origin, password_matched)
 
         level = origin.client.level
         self._check_daily_limit(origin, level, amount, detail)
@@ -240,7 +263,7 @@ class TransactionController(BaseAccountController):
         if alerts_this_month >= level.income_alerts_per_month:
             self._block(origin, Event.REASON_INCOME)
             self._refuse_with_event(
-                IncomeLimitExceeded(level.income_alerts_per_month),
+                IncomeLimitExceeded(level.income_alerts_per_month, amount, income_limit),
                 account=origin,
                 detail=detail,
             )
@@ -262,8 +285,19 @@ class TransactionController(BaseAccountController):
 
         account = self.account_repository.get_by_key(account_key)
 
+        # Tipo e valor da operação dona da chave só aparecem para quem
+        # participou dela: de outra conta, a resposta não revela nada.
+        involved_keys = {existing.destination_account.account_key}
+        if existing.origin_account is not None:
+            involved_keys.add(existing.origin_account.account_key)
+
+        if account_key in involved_keys:
+            conflict = TransactionKeyConflict(existing.transaction_key, existing.transaction_type.enumerator, existing.amount)
+        else:
+            conflict = TransactionKeyConflict(existing.transaction_key)
+
         self._refuse_with_event(
-            TransactionKeyConflict(existing.transaction_key),
+            conflict,
             account=account,
             transaction=existing,
             detail=self._operation_detail(existing.transaction_key, requested),

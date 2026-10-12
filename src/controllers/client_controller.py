@@ -6,9 +6,14 @@ from connectors import ReceitaConnector, SerasaConnector
 from controllers.base_controller import BaseController
 from dtos import ClientDTO
 from errors import (
+    BirthdateInFuture,
+    DocumentNotFoundAtReceita,
     DuplicatedDocumentNumber,
     DuplicatedEmail,
-    ExternalServiceUnavailable,
+    ExternalServiceCredentialRejected,
+    ExternalServiceError,
+    ExternalServiceInvalidResponse,
+    ImplausibleBirthdate,
     InvalidDocumentNumber,
     IrregularDocumentNumber,
     NotFoundClient,
@@ -20,12 +25,15 @@ from utils import clock
 from utils.document_number import is_valid_cpf
 
 MINIMUM_AGE = 18
+MAXIMUM_AGE = 130
 
 MINIMUM_GOLD_SCORE = 600
 
 REGULAR_SITUATION = "REGULAR"
 HIGH_FRAUD_RISK = "HIGH"
 SERASA_REQUIRED_FIELDS = ["has_restriction", "fraud_risk", "score", "has_late_payments"]
+
+CREDENTIAL_REJECTED_STATUSES = {401, 403}
 
 BLOCKED_BY_RESTRICTION = "restriction"
 BLOCKED_BY_FRAUD_RISK = "fraud_risk"
@@ -57,10 +65,23 @@ class ClientController(BaseController):
         if self.client_repository.get_by_email(email) is not None:
             raise DuplicatedEmail(email)
 
+        if birthdate > clock.today():
+            raise BirthdateInFuture(client_data["birthdate"])
+
         age = self._age_in_years(birthdate)
 
         if age < MINIMUM_AGE:
             raise UnderageClient(age, MINIMUM_AGE)
+
+        if age > MAXIMUM_AGE:
+            raise ImplausibleBirthdate(client_data["birthdate"], MAXIMUM_AGE)
+
+        # Daqui para a frente vêm Receita e Serasa, que podem levar até o
+        # timeout cada uma. Encerrar a transação de leitura devolve a conexão
+        # ao pool durante a espera: antes, cada cadastro lento segurava uma
+        # conexão parada, e 15 cadastros juntos travavam a API inteira.
+        # A duplicidade continua garantida pelo UNIQUE na hora de gravar.
+        self.session.rollback()
 
         situation = self._consult_receita(document_number)
 
@@ -88,7 +109,7 @@ class ClientController(BaseController):
             classification["level"] = level.enumerator
 
         new_client_data = {
-            "name": client_data["name"],
+            "name": client_data["name"].strip(),
             "email": email,
             "document_number": document_number,
             "birthdate": birthdate,
@@ -141,21 +162,35 @@ class ClientController(BaseController):
 
     def _consult_receita(self, document_number: str) -> str:
         response = self.receita_connector.get_document_situation(document_number)
+        service_name = self.receita_connector.service_name
 
-        if response.status != 200 or not isinstance(response.json, dict) or "situation" not in response.json:
-            raise ExternalServiceUnavailable(self.receita_connector.service_name)
+        if response.status == 404:
+            raise DocumentNotFoundAtReceita(document_number)
 
-        return response.json["situation"]
+        self._check_service_answer(service_name, response)
+
+        situation = response.json.get("situation")
+        if not isinstance(situation, str) or not situation:
+            raise ExternalServiceInvalidResponse(service_name, "campo situation ausente ou vazio")
+
+        return situation
 
     def _consult_serasa(self, document_number: str) -> dict:
         response = self.serasa_connector.get_credit_report(document_number)
+        service_name = self.serasa_connector.service_name
 
-        if response.status != 200 or not isinstance(response.json, dict):
-            raise ExternalServiceUnavailable(self.serasa_connector.service_name)
+        self._check_service_answer(service_name, response)
 
         for field in SERASA_REQUIRED_FIELDS:
             if field not in response.json:
-                raise ExternalServiceUnavailable(self.serasa_connector.service_name)
+                raise ExternalServiceInvalidResponse(service_name, f"campo {field} ausente")
+
+        score = response.json["score"]
+        if score is not None and (isinstance(score, bool) or not isinstance(score, int)):
+            raise ExternalServiceInvalidResponse(service_name, "campo score não é um número inteiro")
+
+        if not isinstance(response.json["fraud_risk"], str):
+            raise ExternalServiceInvalidResponse(service_name, "campo fraud_risk não é texto")
 
         return {
             "has_restriction": bool(response.json["has_restriction"]),
@@ -163,6 +198,16 @@ class ClientController(BaseController):
             "score": response.json["score"],
             "has_late_payments": bool(response.json["has_late_payments"]),
         }
+
+    def _check_service_answer(self, service_name: str, response) -> None:
+        if response.status in CREDENTIAL_REJECTED_STATUSES:
+            raise ExternalServiceCredentialRejected(service_name, response.status)
+
+        if response.status != 200:
+            raise ExternalServiceError(service_name, response.status)
+
+        if not isinstance(response.json, dict):
+            raise ExternalServiceInvalidResponse(service_name, "a resposta não é um objeto JSON")
 
     def _blocking_reason(self, credit_report: dict):
         if credit_report["has_restriction"]:

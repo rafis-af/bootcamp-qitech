@@ -6,14 +6,21 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from errors.base_error import (
     QIException,
     InternalError,
+    InvalidBodyType,
+    InvalidJson,
     InvalidParameter,
     InvalidSchema,
     MethodNotAllowed,
+    MissingBody,
     NotFoundResource,
 )
+from errors.unexpected import is_bug, map_unexpected_exception
 from utils.logger import get_logger
+from utils.request_context import get_request_id
 
 logger = get_logger(__name__)
+
+BODY_TYPE_ERRORS = {"dict_type", "model_attributes_type"}
 
 
 def qi_exception_to_response(exception: QIException) -> JSONResponse:
@@ -23,6 +30,11 @@ def qi_exception_to_response(exception: QIException) -> JSONResponse:
         "translation": exception.translation,
         "code": exception.code,
     }
+
+    field = getattr(exception, "field", None)
+    if field:
+        body["field"] = field
+
     return JSONResponse(status_code=exception.http_status, content=body)
 
 
@@ -40,6 +52,43 @@ def describe_validation_error(error: dict) -> str:
     return message
 
 
+def validation_error_to_qi_exception(error: dict) -> QIException:
+    """O FastAPI só valida o corpo como "um dict"; o resto é do jsonschema.
+
+    Então o que cai aqui é sempre um destes: o corpo não é JSON, não veio,
+    ou veio JSON mas não é um objeto. Cada um tem a sua mensagem.
+    """
+    error_type = error.get("type")
+    location = tuple(error.get("loc", ()))
+    origin = location[0] if location else ""
+
+    if error_type == "json_invalid":
+        position = location[1] if len(location) > 1 else None
+        return InvalidJson(position)
+
+    if origin == "body" and error_type == "missing":
+        return MissingBody()
+
+    if origin == "body" and error_type in BODY_TYPE_ERRORS:
+        return InvalidBodyType()
+
+    description = describe_validation_error(error)
+
+    if origin in ("query", "path"):
+        return InvalidParameter(description)
+
+    return InvalidSchema(description)
+
+
+def log_unexpected(request: Request, error: Exception, mapped: QIException) -> None:
+    where = f"{request.method} {request.url.path}"
+
+    if is_bug(mapped):
+        logger.exception(f"Erro inesperado em {where}", exc_info=error)
+    else:
+        logger.error(f"{mapped.code} {mapped.title} em {where}: {type(error).__name__}: {error}")
+
+
 def register_error_handlers(application: FastAPI) -> None:
     @application.exception_handler(QIException)
     def handle_qi_exception(request: Request, exception: QIException) -> JSONResponse:
@@ -48,13 +97,19 @@ def register_error_handlers(application: FastAPI) -> None:
     @application.exception_handler(StarletteHTTPException)
     def handle_http_exception(request: Request, exception: StarletteHTTPException) -> JSONResponse:
         if exception.status_code == 404:
-            return qi_exception_to_response(NotFoundResource())
+            return qi_exception_to_response(NotFoundResource(request.method, request.url.path))
 
         if exception.status_code == 405:
-            return qi_exception_to_response(MethodNotAllowed())
+            allowed = (exception.headers or {}).get("Allow", "")
+            allowed_methods = [method.strip() for method in allowed.split(",") if method.strip()]
+            return qi_exception_to_response(MethodNotAllowed(request.method, request.url.path, allowed_methods))
+
+        if 400 <= exception.status_code < 500:
+            detail = str(exception.detail)
+            return qi_exception_to_response(InvalidSchema(detail, f"Requisição inválida: {detail}"))
 
         logger.error(f"HTTP {exception.status_code} em {request.url.path}: {exception.detail}")
-        return qi_exception_to_response(InternalError())
+        return qi_exception_to_response(InternalError(get_request_id()))
 
     @application.exception_handler(RequestValidationError)
     def handle_validation_error(request: Request, exception: RequestValidationError) -> JSONResponse:
@@ -65,15 +120,12 @@ def register_error_handlers(application: FastAPI) -> None:
         else:
             first_error = {}
 
-        description = describe_validation_error(first_error)
-        origin = first_error.get("loc", [""])[0]
-
-        if origin in ("query", "path"):
-            return qi_exception_to_response(InvalidParameter(description))
-
-        return qi_exception_to_response(InvalidSchema(description))
+        return qi_exception_to_response(validation_error_to_qi_exception(first_error))
 
     @application.exception_handler(Exception)
     def handle_unexpected_error(request: Request, exception: Exception) -> JSONResponse:
-        logger.exception(f"Erro inesperado em {request.method} {request.url.path}")
-        return qi_exception_to_response(InternalError())
+        # Última rede. O normal é o session_manager já ter convertido o erro
+        # (e aí a resposta sai com o X-Request-ID e entra no log de saída).
+        mapped = map_unexpected_exception(exception, get_request_id())
+        log_unexpected(request, exception, mapped)
+        return qi_exception_to_response(mapped)

@@ -4,7 +4,7 @@ from abc import ABCMeta
 
 import requests
 
-from errors import ExternalServiceUnavailable
+from errors import ExternalServiceUnavailable, ExternalServiceUnreachable
 from utils.logger import get_logger
 
 
@@ -35,10 +35,18 @@ class RestConnector(metaclass=ABCMeta):
                 headers=headers,
                 timeout=self.timeout,
             )
-        except requests.exceptions.RequestException as error:
+        except requests.exceptions.Timeout as error:
+            # Conectou (ou tentou) e o serviço não respondeu dentro do timeout.
             elapsed_ms = (time.perf_counter() - started_at) * 1000
-            self.logger.error(f"NO RESPONSE {method} {url} - {elapsed_ms:.1f} ms - {type(error).__name__}")
-            raise ExternalServiceUnavailable(self.service_name)
+            self.logger.error(f"TIMEOUT {method} {url} - {elapsed_ms:.1f} ms - {type(error).__name__}")
+            raise ExternalServiceUnavailable(self.service_name, self.timeout)
+        except requests.exceptions.RequestException as error:
+            # Nem conectou: serviço fora do ar, porta fechada, nome que não
+            # resolve ou URL mal configurada. Responde na hora, sem esperar
+            # o timeout, e a mensagem não finge que foi demora.
+            elapsed_ms = (time.perf_counter() - started_at) * 1000
+            self.logger.error(f"NO CONNECTION {method} {url} - {elapsed_ms:.1f} ms - {type(error).__name__}: {error}")
+            raise ExternalServiceUnreachable(self.service_name)
 
         elapsed_ms = (time.perf_counter() - started_at) * 1000
         self.logger.info(f"INCOMING RESPONSE {response.status_code} {method} {url} - {elapsed_ms:.1f} ms")

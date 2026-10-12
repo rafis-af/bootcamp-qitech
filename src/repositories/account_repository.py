@@ -23,7 +23,7 @@ class AccountRepository:
         return account
 
     def get_by_key(self, account_key: str) -> Optional[Account]:
-        return self.session.query(Account).filter(Account.account_key == account_key).first()
+        return self.session.query(Account).filter(Account.account_key == account_key.lower()).first()
 
     def lock(self, account_id: int) -> Account:
         return (

@@ -22,8 +22,9 @@ class TestPassword:
         assert status == 401
 
         status, response = transfer(origin["account_key"], destination["account_key"], 100, WRONG_PASSWORD)
-        assert status == 409
-        assert response["code"] == "QIT001012"
+        assert status == 423
+        assert response["code"] == "QIT001017"
+        assert response["field"] == "password"
 
         # Bloqueada, nem a senha certa passa.
         status, response = transfer(origin["account_key"], destination["account_key"], 100, "123456")

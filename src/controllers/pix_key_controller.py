@@ -4,7 +4,7 @@ from sqlalchemy.exc import IntegrityError
 
 from controllers.base_account_controller import BaseAccountController
 from dtos import PixKeyDTO
-from errors import PixKeyAlreadyRegistered, PixKeyLimitReached, PixKeyNotOwnDocument
+from errors import PixKeyAlreadyInThisAccount, PixKeyAlreadyRegistered, PixKeyLimitReached, PixKeyNotOwnDocument
 from models import PixKey
 from repositories import PixKeyRepository
 
@@ -24,15 +24,29 @@ class PixKeyController(BaseAccountController):
         if key_type == PixKey.RANDOM:
             key_value = str(uuid4())
         else:
-            key_value = pix_key_data["key_value"].lower()
+            # strip(): o "$" das regex do schema aceita um "\n" no fim, e uma
+            # chave gravada com ele ficaria impossível de achar no envio.
+            key_value = pix_key_data["key_value"].strip().lower()
 
         account = self._get_account(account_key)
+        operation_detail = {"operation": "create_pix_key", "key_type": key_type}
+
+        # Conta já bloqueada é recusada sem gastar bcrypt; a checagem que vale
+        # é a de baixo, com a trava.
+        self._check_active(account, operation_detail)
+
+        # Senha conferida antes da trava (veja _password_matches).
+        password_matched = self._password_matches(account, pix_key_data["password"])
+
         self._lock_accounts(account)
 
-        self._check_active(account, {"operation": "create_pix_key", "key_type": key_type})
-        self._authenticate(account, pix_key_data["password"])
+        self._check_active(account, operation_detail)
+        self._authenticate(account, password_matched)
 
-        if self.pix_key_repository.get_by_value(key_value) is not None:
+        existing_key = self.pix_key_repository.get_by_value(key_value)
+        if existing_key is not None:
+            if existing_key.account_id == account.id:
+                self._refuse(PixKeyAlreadyInThisAccount(key_value))
             self._refuse(PixKeyAlreadyRegistered(key_value))
 
         if key_type == PixKey.CPF and key_value != account.client.document_number:

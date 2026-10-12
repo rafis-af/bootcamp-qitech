@@ -60,7 +60,7 @@ class TestPix:
         status, response = RequestGenerator.POST_pix(origin["account_key"], payload)
 
         assert status == 422
-        assert response["code"] == "QIT001021"
+        assert response["code"] == "QIT001034"
 
     def test_same_refusals_as_the_transfer(self):
         origin = ObjectGenerator.create_funded_account(1000)

@@ -222,7 +222,7 @@ depende dos **três primeiros dígitos do CPF**:
 |---|---|---|
 | qualquer outro | Receita REGULAR, Serasa limpa, score 800 | `201` Ouro |
 | `900` / `901` | Receita SUSPENSA / CANCELADA | `422` QIT001007, nada gravado |
-| `910` | Receita demora 6 s | `503` QIT001009, nada gravado |
+| `910` | Receita demora 6 s | `503` QIT001009 (sem resposta em 5 s), nada gravado |
 | `920` | Serasa: restrição (nome sujo) | `201` bloqueado, sem nível |
 | `921` | Serasa: risco de fraude alto | `201` bloqueado, sem nível |
 | `922` | score 599 | `201` Prata |
@@ -249,8 +249,8 @@ Com a API de pé (`(healthy)` no `docker compose ps`):
 docker compose --profile tests run --build --rm tests
 ```
 
-São 96 testes, cerca de 25 segundos. O resultado esperado no fim é
-`96 passed`.
+São 121 testes, cerca de 50 segundos. O resultado esperado no fim é
+`121 passed`.
 
 **Rodam em paralelo** (pytest-xdist, ligado no `pytest.ini` com `-n auto`:
 um worker por CPU). Isso só é possível porque **nenhum teste depende de
@@ -301,6 +301,7 @@ O que a suíte cobre, por arquivo:
 | `tests/integration/transaction/` | depósito, transferência, Pix, limite diário, renda, tarifa dinâmica, idempotência e **concorrência** (saídas simultâneas, mesmo ID ao mesmo tempo, A→B e B→A sem deadlock) |
 | `tests/integration/pix_key/` | tipos de chave, CPF do dono, limite de 5, chave disputada por duas contas |
 | `tests/integration/statement/` | ordem, sinal, saldo depois, paginação, período |
+| `tests/integration/test_error_messages.py` | cada erro com código e mensagem próprios: corpo inválido, campo por campo, token, rota, regras de negócio |
 
 Uma exceção à regra "só HTTP", e ela é explicada em
 `tests/utils/db_utils.py`: os testes **leem** a tabela de eventos (nenhuma
@@ -397,8 +398,26 @@ As rotas pedem o cabeçalho do sistema que chama:
 INTERNAL-TOKEN: default_token
 ```
 
-Sem ele, **403**. A senha da conta é outra coisa: 6 dígitos, criados na
-abertura, pedidos em toda operação que tira dinheiro ou mexe em chave Pix.
+Sem ele, **403** — e a mensagem diz se o header faltou ou veio errado. A
+senha da conta é outra coisa: 6 dígitos, criados na abertura, pedidos em
+toda operação que tira dinheiro ou mexe em chave Pix.
+
+### Banco: pool e limites de tempo
+
+Estas variáveis têm padrão no código (`src/constants.py`) e só precisam
+entrar no `.env` para mudar o valor:
+
+| Variável | Padrão | Para que serve |
+|---|---|---|
+| `DB_POOL_SIZE` | `10` | conexões que ficam abertas com o banco |
+| `DB_MAX_OVERFLOW` | `20` | conexões extras no pico |
+| `DB_POOL_TIMEOUT` | `10` | segundos que um pedido espera por conexão livre antes do `503 QIT000429` |
+| `DB_LOCK_TIMEOUT_MS` | `5000` | quanto um pedido espera a trava de uma conta ocupada antes do `409 QIT000011` |
+| `DB_STATEMENT_TIMEOUT_MS` | `15000` | teto de qualquer consulta, antes do `503 QIT000504` |
+| `DB_IDLE_IN_TRANSACTION_TIMEOUT_MS` | `30000` | derruba transação aberta e parada |
+
+Some `DB_POOL_SIZE + DB_MAX_OVERFLOW` de todas as instâncias da API e
+confira que cabe no `max_connections` do PostgreSQL (100 por padrão).
 
 ---
 
@@ -416,61 +435,99 @@ src/
   connectors/      ← Receita e Serasa
   errors/          ← cada erro com seu código
   middlewares/     ← o que acontece com toda requisição
-  utils/           ← CPF, senha, calendário de São Paulo, log
+  utils/           ← CPF, senha, calendário de São Paulo, valores em R$, log
 database/database.sql  ← as 11 tabelas, em SQL
 mocks/                 ← o mock da Receita e da Serasa
 tests/                 ← os testes
 ```
 
 A explicação de cada camada (e por que elas são separadas) está em
-`docs/como-o-projeto-e-organizado.md`.
+`docs/como-o-projeto-e-organizado.md`. A revisão de erros e gargalos
+(o que mudou, com as medições, e o que ficou como recomendação) está em
+`docs/revisao-erros-e-gargalos.md`.
 
 ---
 
 ## 11. Os códigos de erro
 
-Todo erro responde no mesmo formato:
+Todo erro responde no mesmo formato. Quando o erro é de um campo só, a
+resposta traz também `field`, para quem chamou saber o que corrigir:
 
 ```json
-{"title": "Insufficient balance", "description": "The balance 100 does not cover the amount 5000 plus the fee 150.", "translation": "Saldo insuficiente para o valor mais a tarifa.", "code": "QIT001022"}
+{"title": "Insufficient balance", "description": "The balance 1000 does not cover the amount 5000 plus the fee 150.", "translation": "Saldo insuficiente: a operação precisa de R$ 51,50 (R$ 50,00 + tarifa de R$ 1,50), e o saldo é R$ 10,00.", "code": "QIT001022", "field": "amount"}
 ```
+
+O `translation` é escrito para o caso: um erro de schema diz qual campo
+e em que formato ele deveria vir ("O campo 'document_number' precisa ser
+um CPF no formato 000.000.000-00"), sem nunca repetir o valor recebido
+(a senha não volta numa resposta de erro).
+
+**Requisição e infraestrutura**
 
 | Código | HTTP | Quando |
 |---|---|---|
-| `QIT000001` | 400 | o corpo ou a query string estão fora do formato |
-| `QIT000002` | 403 | faltou o `INTERNAL-TOKEN`, ou ele está errado |
+| `QIT000001` | 400 | um campo do corpo ou da query está fora do formato (a mensagem diz qual e como corrigir) |
+| `QIT000002` | 403 | faltou o `INTERNAL-TOKEN`, ou ele está errado (a mensagem diz qual dos dois) |
+| `QIT000003` | 400 | o corpo não é um JSON válido |
+| `QIT000004` | 400 | a rota precisa de corpo, e ele não veio |
+| `QIT000005` | 400 | o corpo é JSON, mas não é um objeto (`{...}`) |
 | `QIT000010` | 400 | os parâmetros se contradizem (`date_from` depois de `date_to`) |
-| `QIT000404` | 404 | a rota não existe |
-| `QIT000405` | 405 | a rota existe, mas não com esse método |
-| `QIT000500` | 500 | erro inesperado |
+| `QIT000011` | 409 | outra operação está usando a mesma conta (passou do `DB_LOCK_TIMEOUT_MS`); nada gravado, pode repetir |
+| `QIT000012` | 409 | o dado repete um registro único que já existe (corrida entre dois pedidos iguais); nada gravado |
+| `QIT000013` | 422 | um valor está fora do que o banco aceita (grande demais); nada gravado, e o erro vai para o log com traceback |
+| `QIT000404` | 404 | a rota não existe (a mensagem repete método e caminho) |
+| `QIT000405` | 405 | a rota existe, mas não com esse método (a mensagem lista os aceitos) |
+| `QIT000429` | 503 | todas as conexões com o banco ocupadas; nada gravado, pode repetir |
+| `QIT000500` | 500 | erro inesperado (bug); a mensagem traz o `X-Request-ID` para achar no log |
+| `QIT000503` | 503 | banco de dados fora do ar; se caiu na hora de gravar, a operação pode ter sido gravada ou não: confira, ou repita com o mesmo `transaction_key` |
+| `QIT000504` | 503 | a consulta passou do `DB_STATEMENT_TIMEOUT_MS`; nada gravado, pode repetir |
+
+**Negócio**
+
+| Código | HTTP | Quando |
+|---|---|---|
 | `QIT001001` | 404 | cliente não encontrado |
-| `QIT001002` | 422 | CPF com formato certo, mas inválido |
+| `QIT001002` | 422 | CPF com formato certo, mas inválido (o `field` diz se é o do cliente ou o de quem depositou) |
 | `QIT001003` | 409 | CPF já cadastrado (inclusive como bloqueado) |
 | `QIT001004` | 409 | e-mail já cadastrado |
 | `QIT001005` | 422 | menor de 18 anos |
 | `QIT001006` | 422 | data que não existe no calendário |
-| `QIT001007` | 422 | CPF não está REGULAR na Receita |
-| `QIT001008` | 409 | cliente bloqueado não abre conta |
-| `QIT001009` | 503 | Receita ou Serasa sem resposta em 5 s — nada gravado, pode repetir |
-| `QIT001010` | 404 | conta não encontrada |
+| `QIT001007` | 422 | CPF não está REGULAR na Receita (a mensagem traz a situação) |
+| `QIT001008` | 409 | cliente bloqueado na análise não abre conta |
+| `QIT001009` | 503 | Receita ou Serasa sem resposta dentro do timeout — nada gravado, pode repetir |
+| `QIT001010` | 404 | conta não encontrada (a do caminho) |
 | `QIT001011` | 409 | o cliente já tem conta |
-| `QIT001012` | 409 | conta bloqueada |
+| `QIT001012` | 409 | conta bloqueada (a mensagem diz o que ela não pode fazer: depositar, enviar, cadastrar chave) |
 | `QIT001013` | 401 | senha incorreta (a resposta diz quantas tentativas restam) |
 | `QIT001014` | 409 | a conta já está nesse status |
-| `QIT001020` | 409 | `transaction_key` já usado por outra operação, com outros dados |
+| `QIT001015` | 404 | conta de destino não encontrada |
+| `QIT001016` | 409 | conta de destino bloqueada |
+| `QIT001017` | 423 | 3ª senha incorreta seguida: a conta acabou de ser bloqueada |
+| `QIT001020` | 409 | `transaction_key` já usado por outra operação, com outros dados (a mensagem diz o tipo e o valor só se a operação for da mesma conta) |
 | `QIT001021` | 422 | origem e destino são a mesma conta |
-| `QIT001022` | 422 | saldo não cobre valor + tarifa |
-| `QIT001023` | 422 | passa do limite diário de saídas |
+| `QIT001022` | 422 | saldo não cobre valor + tarifa (a mensagem mostra os valores) |
+| `QIT001023` | 422 | passa do limite diário de saídas (a mensagem diz quanto ainda cabe hoje) |
 | `QIT001024` | 422 | saída acima da renda com a cota do mês esgotada — conta bloqueada |
 | `QIT001030` | 404 | chave Pix não encontrada |
-| `QIT001031` | 409 | chave Pix já cadastrada |
+| `QIT001031` | 409 | chave Pix já cadastrada em outra conta |
 | `QIT001032` | 422 | chave `cpf` que não é o CPF do dono |
 | `QIT001033` | 422 | a conta já tem 5 chaves |
+| `QIT001034` | 422 | a chave Pix é da própria conta de origem |
+| `QIT001035` | 409 | a chave Pix já está cadastrada nesta mesma conta |
+| `QIT001040` | 503 | não foi possível conectar à Receita ou à Serasa (fora do ar ou endereço errado) |
+| `QIT001041` | 502 | Receita ou Serasa respondeu com erro HTTP |
+| `QIT001042` | 502 | Receita ou Serasa respondeu fora do formato combinado (a mensagem diz o que faltou) |
+| `QIT001043` | 502 | Receita ou Serasa recusou a credencial desta API (é configuração) |
+| `QIT001044` | 422 | o CPF não existe na base da Receita |
+| `QIT001050` | 422 | data de nascimento no futuro |
+| `QIT001051` | 422 | data de nascimento de mais de 130 anos |
 
 A convenção: **409** é conflito com o que já está no banco; **422** é
-"o pedido foi entendido, e a regra não deixa". Os códigos de negócio
-andam em faixas: `00100x` cliente, `00101x` conta e senha, `00102x`
-dinheiro, `00103x` Pix. Código repetido derruba a API no start
+"o pedido foi entendido, e a regra não deixa"; **502/503** é um serviço
+ou o banco que falhou, e o mesmo pedido pode ser repetido. Os códigos de
+negócio andam em faixas: `00100x` cliente, `00101x` conta e senha,
+`00102x` dinheiro, `00103x` Pix, `00104x` Receita e Serasa, `00105x`
+data de nascimento. Código repetido derruba a API no start
 (`error_verification`) — de propósito.
 
 ---

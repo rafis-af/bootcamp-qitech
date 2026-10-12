@@ -1,13 +1,37 @@
-
 from contextvars import ContextVar
 from typing import Optional
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from constants import DATABASE_URL
+from constants import (
+    DATABASE_URL,
+    DB_IDLE_IN_TRANSACTION_TIMEOUT_MS,
+    DB_LOCK_TIMEOUT_MS,
+    DB_MAX_OVERFLOW,
+    DB_POOL_SIZE,
+    DB_POOL_TIMEOUT,
+    DB_STATEMENT_TIMEOUT_MS,
+)
 
-engine = create_engine(DATABASE_URL, pool_size=5, pool_recycle=600, pool_pre_ping=True)
+SERVER_SETTINGS = (
+    f"-c lock_timeout={DB_LOCK_TIMEOUT_MS} "
+    f"-c statement_timeout={DB_STATEMENT_TIMEOUT_MS} "
+    f"-c idle_in_transaction_session_timeout={DB_IDLE_IN_TRANSACTION_TIMEOUT_MS}"
+)
+
+engine = create_engine(
+    DATABASE_URL,
+    pool_size=DB_POOL_SIZE,
+    max_overflow=DB_MAX_OVERFLOW,
+    pool_timeout=DB_POOL_TIMEOUT,
+    pool_recycle=600,
+    pool_pre_ping=True,
+    # Sem isto, todo erro do banco ia para o log com os parâmetros da
+    # consulta: CPF, e-mail, nome e até o hash da senha.
+    hide_parameters=True,
+    connect_args={"options": SERVER_SETTINGS},
+)
 
 SessionLocal = sessionmaker(bind=engine, autoflush=False)
 

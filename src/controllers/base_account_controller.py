@@ -1,7 +1,14 @@
 from typing import NoReturn, Optional
 
 from controllers.base_controller import BaseController
-from errors import AccountBlocked, NotFoundAccount, QIException, WrongPassword
+from errors import (
+    AccountBlocked,
+    AccountBlockedByPassword,
+    DestinationAccountBlocked,
+    NotFoundAccount,
+    QIException,
+    WrongPassword,
+)
 from models import Account, Client, Event, Status, Transaction
 from repositories import AccountRepository, CatalogRepository, EventRepository
 from utils.password import password_matches
@@ -32,11 +39,30 @@ class BaseAccountController(BaseController):
 
     def _check_active(self, account: Account, detail: dict) -> None:
         if account.status.enumerator == Status.BLOCKED:
-            self._refuse_with_event(AccountBlocked(account.account_key), account=account, detail=detail)
+            error = AccountBlocked(account.account_key, detail.get("operation", detail.get("transaction_type")))
+            self._refuse_with_event(error, account=account, detail=detail)
 
-    def _authenticate(self, account: Account, password: str) -> None:
-        if password_matches(password, account.password_hash):
-            self.account_repository.reset_failed_password_attempts(account)
+    def _check_destination_active(self, destination: Account, origin: Account, detail: dict) -> None:
+        if destination.status.enumerator == Status.BLOCKED:
+            self._refuse_with_event(DestinationAccountBlocked(destination.account_key), account=origin, detail=detail)
+
+    def _password_matches(self, account: Account, password: str) -> bool:
+        """Confere a senha SEM trava nenhuma.
+
+        O bcrypt leva ~0,3 s de propósito. Antes ele rodava com a linha da
+        conta travada, e duas operações da mesma conta esperavam uma pela
+        outra esse tempo todo. O hash não muda (não existe troca de senha),
+        então dá para conferir antes de travar e só registrar o resultado
+        depois, já com a trava (_authenticate).
+        """
+        return password_matches(password, account.password_hash)
+
+    def _authenticate(self, account: Account, password_matched: bool) -> None:
+        """Registra o resultado da senha. Precisa da conta travada: o
+        contador de tentativas é lido e gravado aqui."""
+        if password_matched:
+            if account.failed_password_attempts != 0:
+                self.account_repository.reset_failed_password_attempts(account)
             return
 
         self.account_repository.increment_failed_password_attempts(account)
@@ -49,7 +75,7 @@ class BaseAccountController(BaseController):
 
         if account.failed_password_attempts >= MAX_PASSWORD_ATTEMPTS:
             self._block(account, Event.REASON_PASSWORD)
-            self._refuse(AccountBlocked(account.account_key))
+            self._refuse(AccountBlockedByPassword(account.account_key, MAX_PASSWORD_ATTEMPTS))
 
         self._refuse(WrongPassword(MAX_PASSWORD_ATTEMPTS - account.failed_password_attempts))
 

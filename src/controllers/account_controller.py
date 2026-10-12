@@ -85,7 +85,11 @@ class AccountController(BaseAccountController):
             date_to = clock.parse_date("date_to", date_to)
 
         if date_from is not None and date_to is not None and date_from > date_to:
-            raise InvalidParameter(f"date_from ({date_from}) is after date_to ({date_to})")
+            raise InvalidParameter(
+                f"date_from ({date_from}) is after date_to ({date_to})",
+                f"O período está invertido: date_from ({date_from}) é depois de date_to ({date_to}).",
+                "date_from",
+            )
 
         start = None
         if date_from is not None:
