@@ -16,8 +16,9 @@ if not environ.get("APP_ENV") or environ.get("APP_ENV") == "local":
 
     load_dotenv(path.join(str(root), ".env"))
 
+    # "localhost" e nao "0.0.0.0": no Windows, 0.0.0.0 nao aceita conexao.
     if environ.get("SERVER_LOCALHOST") is None:
-        environ["SERVER_LOCALHOST"] = "0.0.0.0"
+        environ["SERVER_LOCALHOST"] = "localhost"
 
 
 LOCK_DIRECTORY = Path(tempfile.gettempdir())
