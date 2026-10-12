@@ -10,17 +10,19 @@ class ObjectGenerator:
     """Monta cenários pela API, como um cliente de verdade faria."""
 
     @staticmethod
-    def create_client(cpf_prefix: str = None, monthly_income: int = None) -> dict:
+    def create_client(cpf_prefix: str = None, monthly_income: int = None, name: str = None) -> dict:
         """Cadastra um cliente e devolve o corpo da resposta.
 
         O CPF com prefixo de cenário só tem 6 dígitos sorteados, e o banco
-        dos testes não é zerado entre uma rodada e outra: de vez em quando
-        o sorteio repete um CPF de uma rodada anterior. Quando isso
-        acontece, sorteia de novo — o teste que chamou quer UM cliente
-        daquele cenário, não aquele CPF.
+        dos testes nunca é zerado: de vez em quando o sorteio repete um CPF
+        que outro teste (desta rodada ou de uma anterior) já cadastrou.
+        Quando isso acontece, sorteia de novo — o teste que chamou quer UM
+        cliente daquele cenário, não aquele CPF.
         """
         for _attempt in range(5):
-            payload = PayloadGenerator.create_client_payload(cpf_prefix=cpf_prefix, monthly_income=monthly_income)
+            payload = PayloadGenerator.create_client_payload(
+                name=name, cpf_prefix=cpf_prefix, monthly_income=monthly_income
+            )
             status, response = RequestGenerator.POST_client(payload)
 
             if status == 409 and response["code"] == DUPLICATED_DOCUMENT_NUMBER:

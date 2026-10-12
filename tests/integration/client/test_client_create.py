@@ -1,11 +1,18 @@
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
-from tests.utils import DbUtils, MockScenario, PayloadGenerator, RequestGenerator
+from tests.utils import DbUtils, MockScenario, ObjectGenerator, PayloadGenerator, RequestGenerator
 
 
 def birthdate_for_age(age_in_years: int) -> str:
-    """A data de nascimento de quem faz essa idade hoje (com o recuo do 29/02)."""
-    today = date.today()
+    """A data de nascimento de quem faz essa idade hoje (com o recuo do 29/02).
+
+    "Hoje" no calendário de São Paulo, o mesmo da API. O container dos
+    testes roda em UTC: com date.today(), das 21h à meia-noite de Brasília
+    o teste já estaria no dia seguinte, e quem faz 18 anos amanhã para a
+    API passaria por quem faz 18 hoje.
+    """
+    today = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
 
     if today.month == 2 and today.day == 29:
         return date(today.year - age_in_years, 2, 28).isoformat()
@@ -40,36 +47,24 @@ class TestClientClassification:
         assert events[0]["detail"]["score"] == 800
 
     def test_score_below_600_is_silver(self):
-        payload = PayloadGenerator.create_client_payload(cpf_prefix=MockScenario.SERASA_SCORE_599)
+        response = ObjectGenerator.create_client(MockScenario.SERASA_SCORE_599)
 
-        status, response = RequestGenerator.POST_client(payload)
-
-        assert status == 201
         assert response["level"] == "silver"
 
     def test_score_exactly_600_is_gold(self):
         """A borda: "score ≥ 600" inclui o 600. Um > no lugar do >= deixaria este cliente Prata."""
-        payload = PayloadGenerator.create_client_payload(cpf_prefix=MockScenario.SERASA_SCORE_600)
+        response = ObjectGenerator.create_client(MockScenario.SERASA_SCORE_600)
 
-        status, response = RequestGenerator.POST_client(payload)
-
-        assert status == 201
         assert response["level"] == "gold"
 
     def test_no_score_is_silver(self):
-        payload = PayloadGenerator.create_client_payload(cpf_prefix=MockScenario.SERASA_NO_SCORE)
+        response = ObjectGenerator.create_client(MockScenario.SERASA_NO_SCORE)
 
-        status, response = RequestGenerator.POST_client(payload)
-
-        assert status == 201
         assert response["level"] == "silver"
 
     def test_late_payments_make_a_good_score_silver(self):
-        payload = PayloadGenerator.create_client_payload(cpf_prefix=MockScenario.SERASA_LATE_PAYMENTS)
+        response = ObjectGenerator.create_client(MockScenario.SERASA_LATE_PAYMENTS)
 
-        status, response = RequestGenerator.POST_client(payload)
-
-        assert status == 201
         assert response["level"] == "silver"
 
     def test_restriction_is_saved_as_blocked_without_level(self):
@@ -78,11 +73,8 @@ class TestClientClassification:
         E é justamente por estar gravado que o mesmo CPF não consegue
         tentar de novo (RFC 6.1).
         """
-        payload = PayloadGenerator.create_client_payload(cpf_prefix=MockScenario.SERASA_RESTRICTION)
+        response = ObjectGenerator.create_client(MockScenario.SERASA_RESTRICTION)
 
-        status, response = RequestGenerator.POST_client(payload)
-
-        assert status == 201
         assert response["status"] == "blocked"
         assert response["level"] is None
 
@@ -90,18 +82,15 @@ class TestClientClassification:
         assert events[0]["event_type"] == "client_blocked"
         assert events[0]["detail"]["reason"] == "restriction"
 
-        payload_again = PayloadGenerator.create_client_payload(document_number=payload["document_number"])
+        payload_again = PayloadGenerator.create_client_payload(document_number=response["document_number"])
         status, response = RequestGenerator.POST_client(payload_again)
 
         assert status == 409
         assert response["code"] == "QIT001003"
 
     def test_high_fraud_risk_is_saved_as_blocked(self):
-        payload = PayloadGenerator.create_client_payload(cpf_prefix=MockScenario.SERASA_HIGH_FRAUD_RISK)
+        response = ObjectGenerator.create_client(MockScenario.SERASA_HIGH_FRAUD_RISK)
 
-        status, response = RequestGenerator.POST_client(payload)
-
-        assert status == 201
         assert response["status"] == "blocked"
         assert response["level"] is None
 

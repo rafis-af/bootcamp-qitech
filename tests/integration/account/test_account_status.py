@@ -4,7 +4,7 @@ from tests.utils import DbUtils, ObjectGenerator, PayloadGenerator, RequestGener
 
 
 class TestAccountStatus:
-    
+
     def test_block_and_unblock(self):
         account = ObjectGenerator.create_account()
         account_key = account["account_key"]

@@ -1,3 +1,5 @@
+import pytest
+
 from tests.utils import DbUtils, MockScenario, ObjectGenerator, PayloadGenerator, RequestGenerator
 
 INITIAL_FEE = 150
@@ -10,8 +12,14 @@ def transfer(origin_key: str, destination_key: str, amount: int) -> tuple:
 
 
 class TestFee:
-    """Tarifa dinâmica (RFC 2.1): mudar o preço é mudar um dado, sem deploy."""
+    """Tarifa dinâmica (RFC 2.1): mudar o preço é mudar um dado, sem deploy.
 
+    A tarifa vale para todo cliente Prata, inclusive os dos outros testes.
+    Por isso este teste é `exclusive`: roda sozinho (veja tests/conftest.py)
+    e devolve a tarifa antiga no fim.
+    """
+
+    @pytest.mark.exclusive
     def test_new_fee_applies_from_now_on_and_old_operations_keep_theirs(self):
         silver = ObjectGenerator.create_funded_account(100000, MockScenario.SILVER)
         gold = ObjectGenerator.create_funded_account(100000)
@@ -47,6 +55,4 @@ class TestFee:
 
             ObjectGenerator.assert_balance_matches_statement(silver["account_key"])
         finally:
-            # Volta a tabela fee para o que o database.sql cria, para os
-            # testes seguintes contarem com R$ 1,50.
-            DbUtils.rollback()
+            DbUtils.change_fee("silver", "transfer", INITIAL_FEE)

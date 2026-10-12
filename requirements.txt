@@ -11,10 +11,12 @@ pydantic==2.13.4
 # O jsonschema e quem confere o corpo da requisicao contra os arquivos
 # de src/schemas/. E a mesma versao que os servicos da QI usam.
 jsonschema==4.17.3
-SQLAlchemy==2.0.23
-# 2.9.10 e a primeira serie com pacote pronto para ARM: no Mac M1/M2/M3
-# a 2.9.5 tentaria compilar do zero e o build quebrava.
-psycopg2-binary==2.9.10
+# 2.0.23 quebrava no Python 3.13 (AssertionError ao importar). A 2.0.54
+# e a mesma serie 2.0, so com correcoes: roda do 3.11 ao 3.14.
+SQLAlchemy==2.0.54
+# 2.9.11 tem pacote pronto para ARM (Mac M1/M2/M3) e para o Python 3.14.
+# A 2.9.10 tentava compilar do zero no 3.14 e o pip install quebrava.
+psycopg2-binary==2.9.11
 # O requests e com que este servico chama OUTROS servicos por HTTP.
 # So os connectors (src/connectors/) podem usa-lo — nenhuma chamada
 # externa fica solta no meio do codigo.

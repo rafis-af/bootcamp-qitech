@@ -50,6 +50,9 @@ services:
       # Monta o codigo pra dentro do container: salvou o arquivo,
       # a API recarrega sozinha (o --reload ali embaixo).
       - ./src:/app
+      # Os testes tambem montados aqui, para "docker compose exec api python -m pytest"
+      # achar a suite. So existe no ambiente de desenvolvimento; a imagem nao muda.
+      - ./tests:/app/tests
     # --reload: salvou o arquivo, a API reinicia sozinha.
     command: uvicorn app:app --host 0.0.0.0 --port 3000 --no-server-header --reload
     healthcheck:

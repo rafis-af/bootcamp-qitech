@@ -249,18 +249,38 @@ Com a API de pé (`(healthy)` no `docker compose ps`):
 docker compose --profile tests run --build --rm tests
 ```
 
-São 96 testes, cerca de 80 segundos. Os mais lentos são de propósito: os
-dois cenários de timeout esperam os 5 s da RFC, e cada conferência de
-senha custa o tempo do bcrypt.
+São 96 testes, cerca de 25 segundos. O resultado esperado no fim é
+`96 passed`.
 
-O resultado esperado no fim é `96 passed`.
+**Rodam em paralelo** (pytest-xdist, ligado no `pytest.ini` com `-n auto`:
+um worker por CPU). Isso só é possível porque **nenhum teste depende de
+outro**: cada um cria os próprios clientes e contas, olha só para o que
+criou, e nunca apaga o banco. Dá para rodar qualquer teste sozinho, em
+qualquer ordem.
+
+A única exceção é o teste de tarifa: a tarifa vale para todo cliente
+daquele nível, então, enquanto ele roda, outro teste pagaria a tarifa
+errada. Ele leva a marca `@pytest.mark.exclusive` e roda sozinho — espera
+os testes em andamento terminarem, roda, devolve a tarifa antiga, e os
+outros seguem (a trava está em `tests/conftest.py`).
+
+Um arquivo, um teste só, ou por palavra no nome:
+
+```bash
+docker compose --profile tests run --rm tests pytest tests/integration/account/test_password.py
+docker compose --profile tests run --rm tests pytest "tests/integration/account/test_password.py::TestPassword::test_unblock_resets_the_attempts"
+docker compose --profile tests run --rm tests pytest -k "password"
+```
+
+Para depurar, `-n 0` desliga o paralelismo (um teste de cada vez, e o
+`print` aparece com `-s`): `... pytest -n 0 -s tests/...`.
 
 > O serviço `tests` tem o perfil `tests`: por isso ele **não** sobe no
 > `docker compose up` comum, só quando você pede com o comando acima.
 > O `--build` garante que a imagem dos testes esteja com o código atual.
 
-Quer rodar os testes na sua máquina, sem Docker? Precisa de Python 3.11
-(o `psycopg2-binary` fixado no projeto não tem pacote pronto para 3.14):
+Quer rodar os testes na sua máquina, com a API de pé no `docker compose up`?
+Precisa de Python 3.11 ou mais novo (testado do 3.11 ao 3.14):
 
 ```bash
 python -m venv .venv
@@ -268,6 +288,9 @@ python -m venv .venv
 pip install -r requirements-dev.txt
 pytest
 ```
+
+No Windows, rode com `pytest -n 0`: a trava do teste exclusivo usa
+`fcntl`, que só existe no Linux e no Mac.
 
 O que a suíte cobre, por arquivo:
 

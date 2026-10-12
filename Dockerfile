@@ -17,6 +17,11 @@ WORKDIR /app
 COPY src /app
 
 FROM base AS api
+# Dependencias de desenvolvimento (pytest etc.), para rodar a suite com
+# "docker compose exec api python -m pytest".
+COPY requirements-dev.txt /requirements-dev.txt
+RUN pip install -r /requirements-dev.txt
+
 RUN chown -R user /app
 USER user
 
@@ -32,10 +37,7 @@ COPY requirements-dev.txt /requirements-dev.txt
 RUN pip install -r /requirements-dev.txt
 
 WORKDIR /work
+COPY pytest.ini /work/pytest.ini
 COPY tests /work/tests
-
-# Os testes zeram o banco e o recriam com database/database.sql (DbUtils.rollback).
-# Sem este arquivo na imagem, o zeramento apaga o schema e nao consegue recriar.
-COPY database/database.sql /work/database/database.sql
 
 CMD ["pytest"]
