@@ -30,10 +30,18 @@ class AccountController(BaseAccountController):
             raise NotFoundClient(client_key)
 
         if client.status.enumerator != Status.ACTIVE:
-            raise ClientBlocked(client_key)
+            self._refuse_with_event(
+                ClientBlocked(client_key),
+                client=client,
+                detail={"operation": "open_account"},
+            )
 
         if client.account is not None:
-            raise ClientAlreadyHasAccount(client_key)
+            self._refuse_with_event(
+                ClientAlreadyHasAccount(client_key),
+                client=client,
+                detail={"operation": "open_account"},
+            )
 
         password_hash = hash_password(account_data["password"])
         active_status = self.catalog_repository.get_status(Status.ACTIVE)

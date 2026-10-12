@@ -1,12 +1,19 @@
 from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
 
-from tests.utils import ObjectGenerator, PayloadGenerator, RandomGenerator, RequestGenerator
+from tests.utils import DbUtils, ObjectGenerator, PayloadGenerator, RandomGenerator, RequestGenerator
 
 
 def register(account_key: str, key_type: str, key_value: str = None, password: str = "123456") -> tuple:
     payload = PayloadGenerator.create_pix_key_payload(key_type, key_value, password=password)
     return RequestGenerator.POST_pix_key(account_key, payload)
+
+
+def refusals_with_code(account_key: str, code: str) -> list:
+    return [
+        event for event in DbUtils.events_of_account(account_key)
+        if event["event_type"] == "operation_refused" and event["detail"]["code"] == code
+    ]
 
 
 class TestPixKey:
@@ -76,6 +83,37 @@ class TestPixKey:
         status, response = register(account["account_key"], "random")
         assert status == 422
         assert response["code"] == "QIT001033"
+
+        refusals = refusals_with_code(account["account_key"], "QIT001033")
+        assert len(refusals) == 1
+        assert refusals[0]["detail"]["operation"] == "create_pix_key"
+        assert refusals[0]["request_id"] is not None
+
+    def test_key_taken_by_another_account_becomes_an_event_without_the_key_value(self):
+        first = ObjectGenerator.create_account()
+        second = ObjectGenerator.create_account()
+        email = f"evento.{uuid4()}@exemplo.com.br"
+        register(first["account_key"], "email", email)
+
+        status, response = register(second["account_key"], "email", email)
+        assert status == 409
+        assert response["code"] == "QIT001031"
+
+        refusals = refusals_with_code(second["account_key"], "QIT001031")
+        assert len(refusals) == 1
+        # A chave é dado pessoal: o evento guarda o tipo, nunca o valor.
+        assert email not in str(refusals[0]["detail"])
+
+    def test_same_key_twice_in_the_same_account_becomes_an_event(self):
+        account = ObjectGenerator.create_account()
+        email = f"repetida.{uuid4()}@exemplo.com.br"
+        register(account["account_key"], "email", email)
+
+        status, response = register(account["account_key"], "email", email)
+        assert status == 409
+        assert response["code"] == "QIT001035"
+
+        assert len(refusals_with_code(account["account_key"], "QIT001035")) == 1
 
     def test_asks_for_the_password(self):
         account = ObjectGenerator.create_account()

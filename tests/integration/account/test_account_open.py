@@ -1,6 +1,13 @@
 from uuid import uuid4
 
-from tests.utils import MockScenario, ObjectGenerator, PayloadGenerator, RequestGenerator
+from tests.utils import DbUtils, MockScenario, ObjectGenerator, PayloadGenerator, RequestGenerator
+
+
+def refusals_with_code(client_key: str, code: str) -> list:
+    return [
+        event for event in DbUtils.events_of_client(client_key)
+        if event["event_type"] == "operation_refused" and event["detail"]["code"] == code
+    ]
 
 
 class TestAccountOpen:
@@ -43,6 +50,22 @@ class TestAccountOpen:
 
         assert status == 409
         assert response["code"] == "QIT001008"
+
+        refusals = refusals_with_code(client["client_key"], "QIT001008")
+        assert len(refusals) == 1
+        assert refusals[0]["detail"]["operation"] == "open_account"
+        assert refusals[0]["request_id"] is not None
+
+    def test_second_account_refusal_becomes_an_event(self):
+        account = ObjectGenerator.create_account()
+
+        status, response = RequestGenerator.POST_account(
+            account["client_key"], PayloadGenerator.create_account_payload()
+        )
+        assert status == 409
+        assert response["code"] == "QIT001011"
+
+        assert len(refusals_with_code(account["client_key"], "QIT001011")) == 1
 
     def test_unknown_client(self):
         status, response = RequestGenerator.POST_account(str(uuid4()), PayloadGenerator.create_account_payload())

@@ -99,8 +99,9 @@ schema conferido uma vez só e guardado em memória, a validação cai para
 
 **Renda zero aceita.** Com `monthly_income = 0`, toda saída fica "acima
 da renda": as 3 primeiras geram alerta e a 4ª bloqueia a conta, de
-qualquer valor. A RFC pede renda maior que zero; o schema agora recusa
-zero com mensagem própria.
+qualquer valor. A RFC não fixa um valor mínimo de renda; o schema agora
+recusa zero com mensagem própria. É decisão do projeto, não exigência da
+RFC.
 
 **Chave de conta em maiúsculas.** A mesma conta escrita em maiúsculas
 dava "não encontrada", e um reenvio legítimo com a chave em maiúsculas
@@ -149,8 +150,8 @@ para o log (`hide_parameters`).
    `.env.example` aponta os mocks para `http://mock:8080`, que só existe
    dentro do Docker: rodando fora dele, o cadastro responde `QIT001040`
    (antes, dizia que a Receita "não respondeu a tempo").
-8. **404 da Receita.** Seguindo a RFC, um 404 da Receita agora quer dizer
-   "CPF não existe na Receita". Se a URL da Receita estiver errada no
+8. **404 da Receita.** A RFC não diz o que um 404 da Receita significa;
+   o projeto passou a tratar como "CPF não existe na Receita" (QIT001044). Se a URL da Receita estiver errada no
    caminho, o erro vai dizer isso também; confira a URL ao trocar o mock
    pelo serviço de verdade.
 9. **Detalhes menores.** A rota `/` mostra o PID do processo; os

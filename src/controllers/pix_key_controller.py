@@ -43,17 +43,19 @@ class PixKeyController(BaseAccountController):
         self._check_active(account, operation_detail)
         self._authenticate(account, password_matched)
 
+        # O detalhe do evento leva o tipo da chave, nunca o valor: a chave é
+        # dado pessoal (CPF, e-mail ou telefone).
         existing_key = self.pix_key_repository.get_by_value(key_value)
         if existing_key is not None:
             if existing_key.account_id == account.id:
-                self._refuse(PixKeyAlreadyInThisAccount(key_value))
-            self._refuse(PixKeyAlreadyRegistered(key_value))
+                self._refuse_with_event(PixKeyAlreadyInThisAccount(key_value), account=account, detail=operation_detail)
+            self._refuse_with_event(PixKeyAlreadyRegistered(key_value), account=account, detail=operation_detail)
 
         if key_type == PixKey.CPF and key_value != account.client.document_number:
             self._refuse(PixKeyNotOwnDocument())
 
         if self.pix_key_repository.count_by_account(account) >= MAX_PIX_KEYS_PER_ACCOUNT:
-            self._refuse(PixKeyLimitReached(MAX_PIX_KEYS_PER_ACCOUNT))
+            self._refuse_with_event(PixKeyLimitReached(MAX_PIX_KEYS_PER_ACCOUNT), account=account, detail=operation_detail)
 
         pix_key = self.pix_key_repository.create(account, key_type, key_value)
 

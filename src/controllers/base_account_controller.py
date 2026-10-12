@@ -109,6 +109,7 @@ class BaseAccountController(BaseController):
         account: Optional[Account] = None,
         transaction: Optional[Transaction] = None,
         detail: Optional[dict] = None,
+        client: Optional[Client] = None,
     ) -> NoReturn:
         event_detail = {"code": error.code, "reason": error.title}
 
@@ -121,5 +122,6 @@ class BaseAccountController(BaseController):
             account=account,
             transaction=transaction,
             detail=event_detail,
+            client=client,
         )
         self._refuse(error)
