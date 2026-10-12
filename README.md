@@ -6,7 +6,7 @@ Pix com tarifa, limite diário e verificação de renda, e extrato paginado
 — com cada operação acontecendo **uma vez só**, mesmo com pedidos
 simultâneos ou repetidos.
 
-É a implementação da **RFC v8** do time (Rafael Almeida · Guilherme Silva
+É a implementação da **RFC** do time (Rafael Almeida · Guilherme Silva
 Xavier), construída sobre a `bootcamp-base-api`: **Python + FastAPI**,
 **PostgreSQL** com **SQLAlchemy**, contratos em **JSON Schema**, tudo em
 **Docker**.
